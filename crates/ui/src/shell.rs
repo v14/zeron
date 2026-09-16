@@ -1949,6 +1949,7 @@ impl Shell {
             if let Some((pct, img_path)) = spec.split_once(':')
                 && let Ok(pct) = pct.parse::<u64>()
                 && let Ok(att) = crate::attachments::stage_file(std::path::Path::new(img_path))
+                && let Some(image) = att.image()
             {
                 let pending_path = format!("pending/{}/{}", att.id, att.name);
                 let device_ids: Vec<String> = {
@@ -1965,7 +1966,7 @@ impl Shell {
                         device_id,
                         &pending_path,
                         &att.name,
-                        att.image.clone(),
+                        image.clone(),
                     );
                 }
                 let text = crate::attachments::with_attachments(
