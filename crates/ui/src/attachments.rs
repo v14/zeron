@@ -208,30 +208,25 @@ pub fn user_message_rail_text(content: &str) -> String {
     }
 }
 
-/// A filename tile for opaque attachments; never send their bytes to an image decoder.
-pub fn file_tile(name: &str, theme: &crate::theme::Theme) -> gpui::Div {
+/// Compact filename label for opaque attachments; never decode their bytes as images.
+pub fn file_chip(name: &str, theme: &crate::theme::Theme) -> gpui::Div {
     div()
-        .size_full()
+        .font_family(theme.font_sans.clone())
         .min_w_0()
         .flex()
-        .flex_col()
         .items_center()
-        .justify_center()
-        .gap(px(3.0))
-        .px(px(4.0))
+        .gap(px(8.0))
         .child(
-            crate::file_icons::icon(
-                crate::file_icons::FileIconIdentity::file(name),
-                theme.appearance,
-            )
-            .size(px(22.0)),
+            crate::icons::icon(crate::icons::DOCUMENT)
+                .flex_none()
+                .size(px(18.0))
+                .text_color(theme.text_muted),
         )
         .child(
             div()
-                .w_full()
+                .min_w_0()
                 .truncate()
-                .text_center()
-                .text_size(px(10.0))
+                .text_size(px(13.0))
                 .text_color(theme.text)
                 .child(SharedString::from(name.to_owned())),
         )

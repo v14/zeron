@@ -18,7 +18,7 @@ use gpui::{
     DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, KeyBinding, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ObjectFit, PaintQuad, PathPromptOptions, Pixels, Point, Role,
-    ScrollWheelEvent, SharedString, Style, StyledImage as _, Subscription, Task, TextRun,
+    ScrollWheelEvent, SharedString, Size, Style, StyledImage as _, Subscription, Task, TextRun,
     TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill, img, point,
     prelude::*, px, quad, relative, size,
 };
@@ -287,21 +287,64 @@ fn input_drag_scroll_delta(
 /// Staged-attachment strip metrics (zeron attachment-ui.tsx AttachmentStrip:
 /// `flex flex-wrap gap-2 px-4 pt-3`, `size-14` thumbs).
 pub const STRIP_THUMB: f32 = 56.0;
+pub const STRIP_FILE_HEIGHT: f32 = 36.0;
+pub const STRIP_FILE_MAX_WIDTH: f32 = 260.0;
 pub const STRIP_GAP: f32 = 8.0;
 pub const STRIP_PAD_TOP: f32 = 12.0;
 pub const STRIP_PAD_X: f32 = 16.0;
 
-/// Height the wrap strip adds to the pill for `count` staged thumbnails at an
-/// `inner_width` pill content width (0 when empty). Mirrors flex-wrap: as many
-/// 56px thumbs per row as fit with 8px gaps inside the 16px side insets.
-pub fn attachment_strip_height(count: usize, inner_width: f32) -> f32 {
-    if count == 0 {
-        return 0.0;
-    }
+/// Match flex-wrap, including the tallest attachment in each mixed file/image row.
+pub fn attachment_strip_height(
+    sizes: impl IntoIterator<Item = Size<Pixels>>,
+    inner_width: f32,
+) -> f32 {
     let usable = (inner_width - 2.0 * STRIP_PAD_X).max(STRIP_THUMB);
-    let per_row = (((usable + STRIP_GAP) / (STRIP_THUMB + STRIP_GAP)).floor() as usize).max(1);
-    let rows = count.div_ceil(per_row);
-    STRIP_PAD_TOP + rows as f32 * STRIP_THUMB + (rows - 1) as f32 * STRIP_GAP
+    let mut height = 0.0;
+    let mut row_width = 0.0;
+    let mut row_height: f32 = 0.0;
+    for dimensions in sizes {
+        let width = f32::from(dimensions.width).min(usable);
+        if row_height > 0.0 && row_width + STRIP_GAP + width > usable {
+            height += row_height + STRIP_GAP;
+            row_width = 0.0;
+            row_height = 0.0;
+        }
+        row_width += if row_width == 0.0 {
+            width
+        } else {
+            STRIP_GAP + width
+        };
+        row_height = row_height.max(f32::from(dimensions.height));
+    }
+    if row_height == 0.0 {
+        0.0
+    } else {
+        STRIP_PAD_TOP + height + row_height
+    }
+}
+
+fn attachment_size(att: &StagedAttachment, theme: &Theme, window: &Window) -> Size<Pixels> {
+    if att.image().is_some() {
+        return size(px(STRIP_THUMB), px(STRIP_THUMB));
+    }
+    let line = window.text_system().shape_line(
+        att.name.clone().into(),
+        px(13.0),
+        &[TextRun {
+            len: att.name.len(),
+            font: gpui::font(theme.font_sans.clone()),
+            color: theme.text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }],
+        None,
+    );
+    // Icon + gap + padding + inset remove button + borders, rounded up for layout.
+    size(
+        px((f32::from(line.width()).ceil() + 78.0).min(STRIP_FILE_MAX_WIDTH)),
+        px(STRIP_FILE_HEIGHT),
+    )
 }
 
 pub fn comment_strip_height(count: usize) -> f32 {
@@ -4623,7 +4666,12 @@ impl Composer {
     /// The staged-thumbnail strip (attachment-ui.tsx AttachmentStrip):
     /// `flex flex-wrap gap-2 px-4 pt-3`, 56px rounded thumbs, a remove button
     /// revealed on hover, click opens the full-size preview.
-    fn render_attachment_strip(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<gpui::Div> {
+    fn render_attachment_strip(
+        &self,
+        theme: &Theme,
+        sizes: &[Size<Pixels>],
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Div> {
         let staged = self.staged();
         if staged.is_empty() {
             return None;
@@ -4634,6 +4682,7 @@ impl Composer {
             .flex()
             .flex_row()
             .flex_wrap()
+            .items_center()
             .gap(px(STRIP_GAP))
             .px(px(STRIP_PAD_X))
             .pt(px(STRIP_PAD_TOP));
@@ -4643,19 +4692,29 @@ impl Composer {
                 .image()
                 .map(|image| attachments::PreviewImage::new(att.name.clone(), image));
             let remove_id = att.id.clone();
+            let is_file = att.image().is_none();
             strip = strip.child(
                 div()
                     .group(group.clone())
+                    .max_w_full()
                     .flex_none()
                     .relative()
                     .child(
                         div()
                             .id(("composer-att-thumb", ix))
-                            .size(px(STRIP_THUMB))
-                            .rounded(px(8.0))
+                            .debug_selector(move || format!("composer-att-thumb-{ix}"))
+                            .w(sizes[ix].width)
+                            .max_w_full()
+                            .h(sizes[ix].height)
+                            .rounded(px(if is_file {
+                                STRIP_FILE_HEIGHT / 2.0
+                            } else {
+                                8.0
+                            }))
+                            .when(is_file, |el| el.bg(crate::theme::ink(0.06)))
                             .overflow_hidden()
                             .border_1()
-                            .border_color(crate::theme::hairline(0.10))
+                            .border_color(crate::theme::hairline(if is_file { 0.08 } else { 0.10 }))
                             .tooltip({
                                 let name = att.name.clone();
                                 move |_, cx| {
@@ -4689,7 +4748,11 @@ impl Composer {
                                     .rounded(px(7.0))
                                     .object_fit(ObjectFit::Cover)
                                     .into_any_element(),
-                                None => attachments::file_tile(&att.name, theme).into_any_element(),
+                                None => attachments::file_chip(&att.name, theme)
+                                    .size_full()
+                                    .pl(px(12.0))
+                                    .pr(px(36.0))
+                                    .into_any_element(),
                             }),
                     )
                     // Own layer: inside the frosted pill everything shares one
@@ -4698,18 +4761,25 @@ impl Composer {
                     .child(crate::frost::layered(
                         div()
                             .id(("composer-att-remove", ix))
+                            .debug_selector(move || format!("composer-att-remove-{ix}"))
                             .absolute()
                             .top(px(-6.0))
                             .right(px(-6.0))
                             .size(px(18.0))
                             .rounded_full()
-                            .bg(theme.bg)
+                            .when(!is_file, |el| el.bg(theme.bg).shadow_sm().opacity(0.0))
+                            .when(is_file, |el| {
+                                el.top(px((STRIP_FILE_HEIGHT - 22.0) / 2.0))
+                                    .right(px(6.0))
+                                    .size(px(22.0))
+                                    .hover(|s| s.bg(crate::theme::ink(0.08)))
+                            })
+                            .role(Role::Button)
+                            .aria_label(format!("Remove {}", att.name))
                             .flex()
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
-                            .shadow_sm()
-                            .opacity(0.0)
                             .group_hover(group, |s| s.opacity(1.0))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 // The button overhangs the thumbnail, whose
@@ -4719,9 +4789,13 @@ impl Composer {
                                 this.remove_attachment(&remove_id, cx);
                             }))
                             .child(
-                                crate::icons::icon(crate::icons::CLOSE_CIRCLE)
-                                    .size(px(14.0))
-                                    .text_color(theme.text_muted),
+                                crate::icons::icon(if is_file {
+                                    crate::icons::CLOSE
+                                } else {
+                                    crate::icons::CLOSE_CIRCLE
+                                })
+                                .size(px(if is_file { 12.0 } else { 14.0 }))
+                                .text_color(theme.text_muted),
                             ),
                     )),
             );
@@ -7389,14 +7463,18 @@ impl Render for Composer {
         // `morph_t`) animates. Steady state renders exactly the target.
         // Staged attachments add the wrap strip's height to the pill in BOTH
         // modes (attachment-ui.tsx AttachmentStrip sits above the input row).
-        let staged_count = self.staged().len();
         // The input width excludes the inline controls in compact mode.
         // Wrap against the pill's content width in both modes, accounting
         // for the outer container padding and the pill's 1px borders.
         let strip_width_hint =
             self.last_available_width.unwrap_or(COMPOSER_MAX_WIDTH) - 2.0 * Theme::SPACE_LG - 2.0;
         let appshot_count = self.staged_appshots().len();
-        let strip_h = attachment_strip_height(staged_count, strip_width_hint);
+        let attachment_sizes: Vec<_> = self
+            .staged()
+            .iter()
+            .map(|att| attachment_size(att, &theme, window))
+            .collect();
+        let strip_h = attachment_strip_height(attachment_sizes.iter().copied(), strip_width_hint);
         let comment_strip_h = comment_strip_height(self.staged_comments(cx).len());
         let base_height = if self.dock_frame.is_some() {
             dock_height(dock_amount)
@@ -7571,7 +7649,7 @@ impl Render for Composer {
             );
         // Staged-thumbnail strip (attachment-ui.tsx AttachmentStrip), above
         // the input inside the pill in both modes.
-        let strip = self.render_attachment_strip(&theme, cx);
+        let strip = self.render_attachment_strip(&theme, &attachment_sizes, cx);
         let appshot_strip = self.render_appshot_strip(&theme, window, cx);
         let comments_chip = self.render_comments_chip(&theme, cx);
 
@@ -7978,6 +8056,58 @@ mod tests {
                 }).unwrap();
             }
         }
+    }
+
+    #[gpui::test]
+    fn file_pills_fit_their_remove_button_and_preserve_the_draft(cx: &mut gpui::TestAppContext) {
+        let (dir, handle) = composer_focus_window(cx);
+        let names = [
+            "notes.md",
+            "長い名前-with-a-very-long-document-filename.txt",
+        ];
+        let staged: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, "fixture").unwrap();
+                attachments::stage_file(&path).unwrap()
+            })
+            .collect();
+        handle
+            .update(cx, |composer, _, cx| {
+                composer
+                    .attachments
+                    .insert(composer.current_key.clone(), staged);
+                composer
+                    .input
+                    .update(cx, |input, cx| input.set_text("Keep my draft", cx));
+                composer.set_available_width(320.0, cx);
+                composer.route_snap_until = Some(Instant::now() + Duration::from_secs(1));
+                cx.notify();
+            })
+            .unwrap();
+        let mut visual = gpui::VisualTestContext::from_window(handle.into(), cx);
+        visual.simulate_resize(size(px(320.0), px(700.0)));
+        visual.update(|window, cx| window.draw(cx).clear());
+        let first = visual.debug_bounds("composer-att-thumb-0").unwrap();
+        let second = visual.debug_bounds("composer-att-thumb-1").unwrap();
+        let remove = visual.debug_bounds("composer-att-remove-0").unwrap();
+        assert_eq!(f32::from(first.size.height), STRIP_FILE_HEIGHT);
+        assert!(
+            first.size.width < second.size.width,
+            "short names should not fill a fixed card"
+        );
+        assert!(first.contains(&remove.origin) && first.contains(&remove.bottom_right()));
+        assert!(second.top() >= first.bottom(), "narrow pills must wrap");
+        visual.simulate_click(remove.center(), gpui::Modifiers::default());
+        handle
+            .read_with(&visual, |composer, cx| {
+                assert_eq!(composer.staged().len(), 1);
+                assert_eq!(composer.staged()[0].name, names[1]);
+                assert_eq!(composer.input.read(cx).text(), "Keep my draft");
+                assert!(composer.preview.is_none());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -8732,6 +8862,30 @@ mod tests {
         );
         // Zero lines still measures one.
         assert_eq!(input_content_height(0), INPUT_LINE_HEIGHT);
+    }
+
+    #[test]
+    fn attachment_strip_wraps_mixed_file_pills_and_images() {
+        let file = size(px(200.0), px(STRIP_FILE_HEIGHT));
+        let image = size(px(56.0), px(56.0));
+        assert_eq!(attachment_strip_height([], 400.0), 0.0);
+        assert_eq!(attachment_strip_height([image; 5], 400.0), 68.0);
+        assert_eq!(
+            attachment_strip_height([file, image, file], 400.0),
+            12.0 + 56.0 + 8.0 + STRIP_FILE_HEIGHT
+        );
+        assert_eq!(
+            attachment_strip_height([file, file], 440.0),
+            12.0 + STRIP_FILE_HEIGHT
+        );
+        assert_eq!(
+            attachment_strip_height([file, file], 439.0),
+            20.0 + 2.0 * STRIP_FILE_HEIGHT
+        );
+        assert_eq!(
+            attachment_strip_height([file, image], 180.0),
+            20.0 + STRIP_FILE_HEIGHT + 56.0
+        );
     }
 
     #[test]

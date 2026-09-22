@@ -5078,14 +5078,21 @@ impl Transcript {
                 let theme = Theme::of(cx);
                 strip = strip.child(
                     div()
-                        .w(px(ATT_THUMB_W))
-                        .h(px(ATT_THUMB_H))
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(crate::theme::hairline(0.11))
+                        .max_w_full()
+                        .flex_none()
                         .flex()
                         .flex_col()
-                        .child(crate::attachments::file_tile(&att.name, &theme))
+                        .gap(px(3.0))
+                        .child(
+                            crate::attachments::file_chip(&att.name, &theme)
+                                .max_w(px(260.0))
+                                .h(px(32.0))
+                                .px(px(10.0))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(crate::theme::hairline(0.11))
+                                .bg(crate::theme::ink(0.035)),
+                        )
                         .when(sending, |el| {
                             el.child(div().text_size(px(10.0)).child("Uploading…"))
                         }),
