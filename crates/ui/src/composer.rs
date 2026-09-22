@@ -287,21 +287,38 @@ fn input_drag_scroll_delta(
 /// Staged-attachment strip metrics (zeron attachment-ui.tsx AttachmentStrip:
 /// `flex flex-wrap gap-2 px-4 pt-3`, `size-14` thumbs).
 pub const STRIP_THUMB: f32 = 56.0;
+pub const STRIP_FILE_WIDTH: f32 = 200.0;
 pub const STRIP_GAP: f32 = 8.0;
 pub const STRIP_PAD_TOP: f32 = 12.0;
 pub const STRIP_PAD_X: f32 = 16.0;
 
-/// Height the wrap strip adds to the pill for `count` staged thumbnails at an
-/// `inner_width` pill content width (0 when empty). Mirrors flex-wrap: as many
-/// 56px thumbs per row as fit with 8px gaps inside the 16px side insets.
-pub fn attachment_strip_height(count: usize, inner_width: f32) -> f32 {
-    if count == 0 {
-        return 0.0;
-    }
+/// Match flex-wrap using the rendered widths of image thumbnails and file cards.
+pub fn attachment_strip_height(widths: impl IntoIterator<Item = f32>, inner_width: f32) -> f32 {
     let usable = (inner_width - 2.0 * STRIP_PAD_X).max(STRIP_THUMB);
-    let per_row = (((usable + STRIP_GAP) / (STRIP_THUMB + STRIP_GAP)).floor() as usize).max(1);
-    let rows = count.div_ceil(per_row);
-    STRIP_PAD_TOP + rows as f32 * STRIP_THUMB + (rows - 1) as f32 * STRIP_GAP
+    let mut rows = 0;
+    let mut row_width = 0.0;
+    for width in widths {
+        let width = width.min(usable);
+        if rows == 0 || row_width + STRIP_GAP + width > usable {
+            rows += 1;
+            row_width = width;
+        } else {
+            row_width += STRIP_GAP + width;
+        }
+    }
+    if rows == 0 {
+        0.0
+    } else {
+        STRIP_PAD_TOP + rows as f32 * STRIP_THUMB + (rows - 1) as f32 * STRIP_GAP
+    }
+}
+
+fn attachment_width(att: &StagedAttachment) -> f32 {
+    if att.image().is_some() {
+        STRIP_THUMB
+    } else {
+        STRIP_FILE_WIDTH
+    }
 }
 
 pub fn comment_strip_height(count: usize) -> f32 {
@@ -4646,12 +4663,15 @@ impl Composer {
             strip = strip.child(
                 div()
                     .group(group.clone())
+                    .max_w_full()
                     .flex_none()
                     .relative()
                     .child(
                         div()
                             .id(("composer-att-thumb", ix))
-                            .size(px(STRIP_THUMB))
+                            .w(px(attachment_width(att)))
+                            .max_w_full()
+                            .h(px(STRIP_THUMB))
                             .rounded(px(8.0))
                             .overflow_hidden()
                             .border_1()
@@ -4689,7 +4709,11 @@ impl Composer {
                                     .rounded(px(7.0))
                                     .object_fit(ObjectFit::Cover)
                                     .into_any_element(),
-                                None => attachments::file_tile(&att.name, theme).into_any_element(),
+                                None => attachments::file_chip(&att.name, theme)
+                                    .size_full()
+                                    .px(px(12.0))
+                                    .bg(crate::theme::ink(0.035))
+                                    .into_any_element(),
                             }),
                     )
                     // Own layer: inside the frosted pill everything shares one
@@ -7389,14 +7413,14 @@ impl Render for Composer {
         // `morph_t`) animates. Steady state renders exactly the target.
         // Staged attachments add the wrap strip's height to the pill in BOTH
         // modes (attachment-ui.tsx AttachmentStrip sits above the input row).
-        let staged_count = self.staged().len();
         // The input width excludes the inline controls in compact mode.
         // Wrap against the pill's content width in both modes, accounting
         // for the outer container padding and the pill's 1px borders.
         let strip_width_hint =
             self.last_available_width.unwrap_or(COMPOSER_MAX_WIDTH) - 2.0 * Theme::SPACE_LG - 2.0;
         let appshot_count = self.staged_appshots().len();
-        let strip_h = attachment_strip_height(staged_count, strip_width_hint);
+        let strip_h =
+            attachment_strip_height(self.staged().iter().map(attachment_width), strip_width_hint);
         let comment_strip_h = comment_strip_height(self.staged_comments(cx).len());
         let base_height = if self.dock_frame.is_some() {
             dock_height(dock_amount)
@@ -8732,6 +8756,16 @@ mod tests {
         );
         // Zero lines still measures one.
         assert_eq!(input_content_height(0), INPUT_LINE_HEIGHT);
+    }
+
+    #[test]
+    fn attachment_strip_wraps_mixed_file_cards_and_images() {
+        assert_eq!(attachment_strip_height([], 400.0), 0.0);
+        assert_eq!(attachment_strip_height([56.0; 5], 400.0), 68.0);
+        assert_eq!(attachment_strip_height([200.0, 56.0, 200.0], 400.0), 132.0);
+        assert_eq!(attachment_strip_height([200.0, 200.0], 440.0), 68.0);
+        assert_eq!(attachment_strip_height([200.0, 200.0], 439.0), 132.0);
+        assert_eq!(attachment_strip_height([200.0, 56.0], 180.0), 132.0);
     }
 
     #[test]

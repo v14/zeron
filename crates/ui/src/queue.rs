@@ -831,9 +831,18 @@ impl Composer {
     ) -> AnyElement {
         use crate::attachments;
         if attachments::format_by_extension(std::path::Path::new(path)).is_none() {
-            return attachments::file_tile(path.rsplit('/').next().unwrap_or(path), &Theme::of(cx))
+            return div()
                 .w(px(40.0))
                 .h(px(28.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    crate::icons::icon(crate::icons::DOCUMENT)
+                        .size(px(18.0))
+                        .text_color(Theme::of(cx).text_muted),
+                )
                 .into_any_element();
         }
         let device = self
