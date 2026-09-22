@@ -267,6 +267,7 @@ async fn relay_delivery_roundtrip(files: Vec<(&str, Vec<u8>)>) {
         last_seen_at: Some(chrono::Utc::now()),
         created_at: None,
         version: Some("0.2.12".into()),
+        cursor_sdk_version: None,
         capabilities: zeron_proto::capabilities::current(),
     });
     let client_a = zeron_rpc::memory_client(core_a.rpc_service());

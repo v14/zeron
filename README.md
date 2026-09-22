@@ -1,6 +1,6 @@
 # Zeron
 
-Control your coding agents (Claude Code, Codex, Cursor, Devin, Grok, Hermes, Pi) locally by default, with optional multi-device sync.
+Control your coding agents (Claude Code, Codex, Cursor, Devin, Grok, Hermes, Pi, Antigravity) locally by default, with optional multi-device sync.
 
 *English | [简体中文](README.zh-CN.md)*
 
@@ -54,6 +54,12 @@ zeron daemon start
 On macOS: use the desktop release, or build `zeron` from source and run `zeron daemon install` to install the launchd service.
 
 On Windows: extract the portable release ZIP and run `zeron.exe`. Keep `zeron-update.json` beside it for in-app updates. See the [development notes](docs/reference/windows-development.md) for source builds.
+
+## Sponsors
+
+Thank you to [The Context Company](https://www.thecontextcompany.com/) for sponsoring Zeron.
+
+You can help fund Zeron's development too. Individuals and companies are welcome to [become a sponsor on GitHub](https://github.com/sponsors/zeronsh).
 
 ---
 
